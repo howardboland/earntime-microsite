@@ -204,8 +204,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const block = message.content.find((b) => b.type === 'text');
     questions = block && block.type === 'text' ? parseQuestions(block.text, data.count) : [];
   } catch (e) {
+    // Classify rather than collapsing everything into "upstream". A missing
+    // credential, a bad credential and a genuine Claude outage need different
+    // fixes, and an undifferentiated 502 sends you looking in the wrong place
+    // — which has already happened twice on this project.
+    const msg = (e as Error)?.message ?? String(e);
     console.error('[quiz/generate] Claude call failed:', e);
-    res.status(502).json({ error: 'upstream', message: 'Could not generate questions right now.' });
+
+    let code = 'upstream';
+    if (/GCP_SA_KEY_B64 is not set/i.test(msg)) {
+      code = 'vertex-credentials-missing';
+    } else if (/invalid_grant|Invalid JWT|unauthorized|401|403/i.test(msg)) {
+      // Almost always a revoked key, or base64 that lost its trailing "=".
+      code = 'vertex-credentials-rejected';
+    } else if (/not found|404|does not have access/i.test(msg)) {
+      code = 'vertex-model-unavailable';
+    } else if (/JSON|Unexpected token/i.test(msg)) {
+      code = 'vertex-credentials-malformed';
+    }
+
+    res.status(code === 'upstream' ? 502 : 500).json({
+      error: code,
+      message: 'Could not generate questions right now.',
+    });
     return;
   }
 
