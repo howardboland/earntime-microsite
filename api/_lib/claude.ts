@@ -51,6 +51,15 @@ export function claude(): AnthropicVertex {
     }),
     projectId: GCP_PROJECT,
     region: REGION,
+    // The SDK derives its host as `https://${region}-aiplatform.googleapis.com`,
+    // which for region "global" yields `global-aiplatform.googleapis.com` — a
+    // host that does not exist. The global endpoint is unprefixed. Without this
+    // override every call 404s, indistinguishably from the model genuinely not
+    // being available on the project.
+    //
+    // The request PATH still uses `/locations/global/...`, which is correct and
+    // matches what the Cloud Function sent.
+    baseURL: 'https://aiplatform.googleapis.com/v1',
   });
   return cached;
 }
