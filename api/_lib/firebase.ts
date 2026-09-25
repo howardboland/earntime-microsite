@@ -80,12 +80,29 @@ export async function requireUid(
     return null;
   }
 
+  // Initialise OUTSIDE the verification try/catch. A missing or malformed
+  // FIREBASE_SERVICE_ACCOUNT is a server misconfiguration, not a bad token —
+  // reporting it as 401 sends you hunting the client while the server is the
+  // problem. Distinguish the two.
+  let auth: ReturnType<typeof getAuth>;
   try {
-    const decoded = await getAuth(app()).verifyIdToken(token);
+    auth = getAuth(app());
+  } catch (e) {
+    console.error('[auth] Firebase Admin init failed:', e);
+    res.status(500).json({
+      error: 'server-misconfigured',
+      message: 'Authentication is not configured on the server.',
+    });
+    return null;
+  }
+
+  try {
+    const decoded = await auth.verifyIdToken(token);
     return decoded.uid;
-  } catch {
-    // Do not echo the verification error — it distinguishes "expired" from
-    // "forged", which is not information a hostile caller needs.
+  } catch (e) {
+    // The reason is logged but not returned: distinguishing "expired" from
+    // "forged" is not information a hostile caller needs.
+    console.warn('[auth] token verification failed:', (e as Error)?.message);
     res.status(401).json({ error: 'unauthenticated', message: 'Sign-in required.' });
     return null;
   }
